@@ -129,7 +129,8 @@ def download_model(file_id, output_path):
     url = f"https://drive.google.com/uc?id={file_id}"
     print(f"Downloading {output_path} from Google Drive...")
     try:
-        gdown.download(url, output_path, quiet=False)
+        # Using the file ID directly is more robust than using the URL
+        gdown.download(id=file_id, output=output_path, quiet=False)
     except Exception as e:
         print(f"Failed to download {output_path}: {e}")
 
