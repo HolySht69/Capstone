@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pickle
 from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from pydub import AudioSegment
 from pydub.playback import play
 from io import BytesIO
@@ -11,8 +12,10 @@ import os
 from gtts import gTTS # Google Text-to-Speech
 from googletrans import Translator # Import Translator
 import math
+import gdown
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 # Initialize Google Translator
 translator = Translator()
@@ -118,6 +121,28 @@ class ChatbotTransformer(nn.Module):
             d_model=d_model, nhead=nhead, num_encoder_layers=num_layers,
             num_decoder_layers=num_layers, batch_first=True)
         self.fc_out = nn.Linear(d_model, output_vocab)
+# Ensure folders exist
+os.makedirs('Chatbot', exist_ok=True)
+os.makedirs('Translation', exist_ok=True)
+
+def download_model(file_id, output_path):
+    url = f"https://drive.google.com/uc?id={file_id}"
+    print(f"Downloading {output_path} from Google Drive...")
+    try:
+        gdown.download(url, output_path, quiet=False)
+    except Exception as e:
+        print(f"Failed to download {output_path}: {e}")
+
+
+
+# Download all required files before loading models/tokenizers
+download_model('1KK-Lbu5UrVLwq4LX9Qy3doR_CwdSP0ht', 'Chatbot/chatbot_best_model.pt')
+download_model('1LwhKdyYSoiPJmR6OzYGkGRFHbiqhHJmK', 'Chatbot/chatbot_transformer.pth')
+download_model('148zyLpKhx_MYRzVsQEilYnHapjorq9QG', 'Chatbot/q_tokenizer.pkl')
+download_model('1x8rPklKFVdB9bcDmTkpPIeZagk0F5FCq', 'Chatbot/a_tokenizer.pkl')
+download_model('18uUpGYshH-6IFgE6GDUgpgSl0rldUi4L', 'Translation/src_tokenizer.pkl')
+download_model('184xm1fCkSNJBAQUE7sqeKoWpWosHArzF', 'Translation/tgt_tokenizer.pkl')
+download_model('1YrnMu7GRcq5lYv5KVcGzjTWWO_sTtxQo', 'Translation/baybayin_transformer_model.pth')
 
 # --- Loading Models and Tokenizers ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -360,4 +385,5 @@ def handle_chatbot():
         return jsonify({"error": "An error occurred in the chatbot."}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5050) 
+    port = int(os.environ.get('PORT', 5050))
+    app.run(host='0.0.0.0', debug=False, port=port) 
