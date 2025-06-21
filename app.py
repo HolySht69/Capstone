@@ -33,6 +33,69 @@ translator = Translator()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"PyTorch is using device: {device}")
 
+### --- Model & Tokenizer Placeholders ---
+# We will load these lazily (on the first request) to save memory at startup.
+translation_model = None
+translation_src_tokenizer = None
+translation_tgt_tokenizer = None
+chatbot_model = None
+chatbot_q_tokenizer = None
+chatbot_a_tokenizer = None
+
+def load_translation_model():
+    global translation_model, translation_src_tokenizer, translation_tgt_tokenizer
+    if translation_model is not None:
+        return
+
+    print("Lazy loading translation model and tokenizers...")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    src_tokenizer_path = os.path.join(current_dir, "Translation", "src_tokenizer.pkl")
+    tgt_tokenizer_path = os.path.join(current_dir, "Translation", "tgt_tokenizer.pkl")
+    model_path = os.path.join(current_dir, "Translation", "baybayin_transformer_model.pth")
+
+    try:
+        with open(src_tokenizer_path, "rb") as f:
+            translation_src_tokenizer = CustomUnpickler(f).load()
+        with open(tgt_tokenizer_path, "rb") as f:
+            translation_tgt_tokenizer = CustomUnpickler(f).load()
+
+        translation_model = TranslationTransformer(len(translation_src_tokenizer), len(translation_tgt_tokenizer)).to(device)
+        translation_model.load_state_dict(torch.load(model_path, map_location=device))
+        translation_model.eval()
+        print("Translation model and tokenizers loaded successfully!")
+    except Exception as e:
+        print(f"Error loading translation model: {e}")
+
+def load_chatbot_model():
+    global chatbot_model, chatbot_q_tokenizer, chatbot_a_tokenizer
+    if chatbot_model is not None:
+        return
+
+    print("Lazy loading chatbot model and tokenizers...")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    q_tokenizer_path = os.path.join(current_dir, "Chatbot", "q_tokenizer.pkl")
+    a_tokenizer_path = os.path.join(current_dir, "Chatbot", "a_tokenizer.pkl")
+    model_path = os.path.join(current_dir, "Chatbot", "chatbot_best_model.pt")
+
+    try:
+        with open(q_tokenizer_path, "rb") as f:
+            chatbot_q_tokenizer = CustomUnpickler(f).load()
+        with open(a_tokenizer_path, "rb") as f:
+            chatbot_a_tokenizer = CustomUnpickler(f).load()
+
+        chatbot_model = ChatbotTransformer(
+            input_vocab=len(chatbot_q_tokenizer),
+            output_vocab=len(chatbot_a_tokenizer),
+            d_model=512, nhead=8, num_layers=6,
+            q_pad_id=chatbot_q_tokenizer.pad_token_id,
+            a_pad_id=chatbot_a_tokenizer.pad_token_id
+        ).to(device)
+        chatbot_model.load_state_dict(torch.load(model_path, map_location=device))
+        chatbot_model.eval()
+        print("Chatbot model and tokenizers loaded successfully!")
+    except Exception as e:
+        print(f"Error loading chatbot model: {e}")
+
 ### --- Reusable Components ---
 
 class PositionalEncoding(nn.Module):
@@ -86,65 +149,6 @@ class ChatbotTransformer(nn.Module):
 # Ensure folders exist
 os.makedirs('Chatbot', exist_ok=True)
 os.makedirs('Translation', exist_ok=True)
-
-# --- Loading Models and Tokenizers ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Load Translation Model
-try:
-    src_tokenizer_path = os.path.join(current_dir, "Translation", "src_tokenizer.pkl")
-    tgt_tokenizer_path = os.path.join(current_dir, "Translation", "tgt_tokenizer.pkl")
-    translation_model_path = os.path.join(current_dir, "Translation", "baybayin_transformer_model.pth")
-
-    with open(src_tokenizer_path, "rb") as f:
-        translation_src_tokenizer = CustomUnpickler(f).load()
-    with open(tgt_tokenizer_path, "rb") as f:
-        translation_tgt_tokenizer = CustomUnpickler(f).load()
-
-    # Note: Ensure these parameters match how the translation model was trained
-    translation_model = TranslationTransformer(len(translation_src_tokenizer), len(translation_tgt_tokenizer)).to(device)
-    translation_model.load_state_dict(torch.load(translation_model_path, map_location=device))
-    translation_model.eval()
-    print("Translation model and tokenizers loaded successfully!")
-    print(f"Translation model loaded on device: {next(translation_model.parameters()).device}")
-except Exception as e:
-    print(f"Error loading translation model or tokenizers: {e}")
-    translation_model = None
-
-# Load Chatbot Model
-try:
-    q_tokenizer_path = os.path.join(current_dir, "Chatbot", "q_tokenizer.pkl")
-    a_tokenizer_path = os.path.join(current_dir, "Chatbot", "a_tokenizer.pkl")
-    chatbot_model_path = os.path.join(current_dir, "Chatbot", "chatbot_best_model.pt") # Using the best model
-
-    with open(q_tokenizer_path, "rb") as f:
-        chatbot_q_tokenizer = CustomUnpickler(f).load()
-    with open(a_tokenizer_path, "rb") as f:
-        chatbot_a_tokenizer = CustomUnpickler(f).load()
-
-    # Parameters MUST match the successful training script
-    d_model = 512
-    nhead = 8
-    num_layers = 6
-
-    chatbot_model = ChatbotTransformer(
-        input_vocab=len(chatbot_q_tokenizer),
-        output_vocab=len(chatbot_a_tokenizer),
-        d_model=d_model,
-        nhead=nhead,
-        num_layers=num_layers,
-        q_pad_id=chatbot_q_tokenizer.pad_token_id,
-        a_pad_id=chatbot_a_tokenizer.pad_token_id
-    ).to(device)
-
-    chatbot_model.load_state_dict(torch.load(chatbot_model_path, map_location=device))
-    chatbot_model.eval()
-    print("Chatbot model and tokenizers loaded successfully!")
-    print(f"Chatbot model loaded on device: {next(chatbot_model.parameters()).device}")
-except Exception as e:
-    print(f"Error loading chatbot model or tokenizers: {e}")
-    chatbot_model = None
-
 
 ### --- Inference Functions ---
 
@@ -253,6 +257,8 @@ def chatbot_response(question, model, q_tokenizer, a_tokenizer, beam_width=5, ma
 
 @app.route('/translate', methods=['POST'])
 def translate_text():
+    load_translation_model() # Ensure model is loaded
+
     if not translation_model or not translation_src_tokenizer or not translation_tgt_tokenizer:
         return jsonify({"error": "Model or tokenizers not loaded."}), 500
 
@@ -313,6 +319,8 @@ def serve_audio(filename):
 
 @app.route('/chatbot', methods=['POST'])
 def handle_chatbot():
+    load_chatbot_model() # Ensure model is loaded
+
     if not chatbot_model:
         return jsonify({"error": "Chatbot model is not loaded."}), 500
         
